@@ -2,6 +2,7 @@
 
 use core::fmt::Debug;
 
+use log::debug;
 use bitflags::bitflags;
 
 /// Flash trait describes page-erasable flash
@@ -40,7 +41,6 @@ pub enum Error<E> {
     Flash(E),
 }
 
-
 impl<E> From<E> for Error<E> {
     fn from(e: E) -> Self {
         Error::Flash(e)
@@ -50,8 +50,8 @@ impl<E> From<E> for Error<E> {
 #[derive(Debug, Clone, PartialEq)]
 #[repr(u8)]
 pub enum PageKind {
-  /// Standard K:V data page
-  Standard = 0x00,
+    /// Standard K:V data page
+    Standard = 0x00,
 }
 
 bitflags!(
@@ -59,7 +59,11 @@ bitflags!(
     /// Default to all bits set for FLASH erased
     const DEFAULT = 0xFFFF;
 
+    /// Indicates a page is not in use (clear to activeate)
+    const INACTIVE = (1 << 0);
 
+    /// Indicates a page is valid (clear to invalidate)
+    const VALID = (1 << 1);
   }
 );
 
@@ -81,26 +85,33 @@ bitflags!(
     /// Default to all bits set for FLASH erased
     const DEFAULT = 0xFFFF;
 
+    /// Indicates an entry is not in use (clear to activate)
+    const INACTIVE = (1 << 0);
 
+    /// Indicates an entry is valid (clear to invalidate)
+    const VALID = (1 << 1);
   }
 );
 
+#[derive(Debug, Clone, PartialEq)]
 struct EntryHeader {
-    /// Entry index
-    ///
-    /// Monotonically increases from 0 as the file system runs,
-    /// wrapping at u32::MAX
-    index: u32,
-    /// Entry usage flags
-    flags: PageFlags,
-}
+    /// Entry index, per-key wrapping monotonic count
+    index: u16,
 
+    flags: EntryFlags,
+
+    key_len: u16,
+
+    val_len: u16,
+}
 
 pub struct Kvs<F: Flash> {
-  flash: F,
-  opts: Options,
-}
+    flash: F,
+    opts: Options,
 
+    page_active: u32,
+    page_offset: u32,
+}
 
 impl<F, E> Kvs<F>
 where
@@ -108,33 +119,83 @@ where
     E: Debug,
 {
     pub fn new(flash: F, opts: Options) -> Result<Self, Error<E>> {
-        let s = Self { flash, opts };
+        let mut s = Self { flash, opts, page_active: 0, page_offset: 0 };
 
-        // TODO: attempt to load existing KVS / create a new KVS
+        s.init()?;        
 
         Ok(s)
     }
 
-    pub fn read(&mut self, key: &[u8], value: &mut [u8]) -> Result<usize, Error<E>> {
-      // TODO: locate (latest) existing entry
+    fn init(&mut self) -> Result<usize, Error<E>> {
+      // Attempt to find existing / latest KVS page
+      let mut current_index = None;
+      for i in 0..self.opts.num_pages {
+          // Read page header
+          let h = self.get_page_header(i * F::PAGE_SIZE)?;
 
-      // TODO: read out header
+          // Skip inactive pages
+          if h.flags.contains(PageFlags::INACTIVE) {
+            continue;
+          }
 
-      // TODO: read out entry data
+          // Skip expired pages
+          if !h.flags.contains(PageFlags::VALID) {
+            continue;
+          }
 
+          // Track current indez
+          match current_index {
+            Some(ref mut c) if *c < h.index => *c = h.index,
+            Some(_) => (),
+            None => current_index = Some(h.index),
+          }
+      }
+
+      match current_index {
+        Some(i) => {
+          debug!("FKVS Initialising with current index: {}", i);
+
+          self.page_active = i;
+
+          unimplemented!()
+        },
+        None => {
+          debug!("FKVS no index found, re-formatting");
+
+          self.format()?;
+        }
+      }
+    }
+
+    /// Format the file system, erasing all content and resetting to the initial state
+    fn format(&mut self) -> Result<usize, Error<E>> {
       unimplemented!()
     }
 
+    /// Read a chunk of data from the file system
+    pub fn read(&mut self, key: &[u8], value: &mut [u8]) -> Result<usize, Error<E>> {
+        // TODO: locate (latest) existing entry
+
+        // TODO: read out header
+
+        // TODO: read out entry data
+
+        unimplemented!()
+    }
+
+    /// Write a chunk of data to the file system
     pub fn write(&mut self, key: &[u8], value: &[u8]) -> Result<(), Error<E>> {
-      // TODO: locate (latest) existing entry
+        // TODO: locate (latest) existing entry
 
-      // TODO: find space for new entry
+        // TODO: check values do not already match
 
-      // TODO: write new entry
+        // TODO: find space for new entry
 
-      // TODO: invalidate previous entry
+        // TODO: write new entry
 
-      unimplemented!()
+        // TODO: invalidate previous entry
+
+        unimplemented!()
     }
 
     /// Erase all (available) pages
@@ -144,5 +205,21 @@ where
         }
 
         Ok(())
+    }
+
+    fn get_page_header(&self, addr: usize) -> Result<PageHeader, Error<E>> {
+        unimplemented!()
+    }
+
+    fn set_page_header(&mut self, addr: usize, ph: PageHeader) -> Result<(), Error<E>> {
+        unimplemented!()
+    }
+
+    fn get_entry_header(&self, addr: usize) -> Result<EntryHeader, Error<E>> {
+        unimplemented!()
+    }
+
+    fn set_entry_header(&mut self, addr: usize, ph: EntryHeader) -> Result<(), Error<E>> {
+        unimplemented!()
     }
 }
